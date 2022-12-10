@@ -1,0 +1,346 @@
+---
+title: "PerformanceModelling"
+format: html
+editor: visual
+---
+
+```{r}
+
+library("dplyr")
+library("sjPlot")
+library("leaps")
+library("ggfortify")
+library("Hmisc")
+library("qtlcharts")
+library("vtable")
+library("olsrr")
+library("plotly")
+library("tidyr")
+library("tidyverse")
+
+```
+
+```{r}
+
+str(d2)
+
+```
+
+```{r}
+
+# Correct Data Classification into factors:
+
+d2 = d2 %>%
+  mutate(famrel = as.factor(famrel),
+         freetime = as.factor(freetime),
+         goout = as.factor(goout),
+         Dalc = as.factor(Dalc),
+         Walc = as.factor(Walc),
+         health = as.factor(health),
+         traveltime = as.factor(traveltime),
+         studytime = as.factor(studytime),
+         Medu = as.factor(Medu),
+         Fedu = as.factor(Fedu),)
+
+```
+
+```{r}
+
+# Summaries of numeric variables:
+
+num_d2 = d2 %>%
+  dplyr::select(where(is.numeric))
+
+sumtable(num_d2,
+         summ=c('mean(x)',
+                'median(x)',
+                'min(x)',
+                'max(x)',
+                'IQR(x)',
+                'sd(x)'))
+```
+
+```{r}
+
+# Summaries of factor variables:
+
+fact_d2 = d2 %>%
+  dplyr::select(where(is.factor))
+
+sumtable(fact_d2,
+         col.breaks = 5)
+
+```
+
+```{r}
+
+# Summaries of character variables:
+
+char_d2 = d2 %>%
+  dplyr::select(where(is.character))
+
+st(char_d2,
+   col.breaks = 8)
+
+```
+
+```{r}
+
+# Understanding G3 
+
+g1 = d2 |> ggplot() + aes(x = 0, y = G3) +
+                 geom_violin(trim=TRUE) + 
+                 stat_summary(fun.data=mean_sdl, geom="pointrange", color="red") +
+                 geom_jitter(aes(x=0, y=G3), alpha=0.25) +
+                 ggtitle("Portuguese Final Exam Scores") +
+                 ylab("Final Exam Score") +
+                 xlab("")
+
+ggplotly(g1)
+
+```
+
+```{r}
+# Justify REMOVAL of ZERO scores: 
+
+
+# Who are the students that scored zero? 
+df_fail = d2 %>%
+  filter(G3 == 0)
+
+#df_fail
+
+st(df_fail)
+```
+
+```{r}
+# Correlation matrix (EXCLUSIVE Numeric Variables)
+
+cor_mat = cor(num_d2)
+melted_cor_mat = cor_mat %>%
+  data.frame() %>% 
+  rownames_to_column(var = "var1") %>% 
+  gather(key = "var2", value = "cor", -var1)
+
+ggplot(data = melted_cor_mat, 
+       aes(x=var1, y=var2, fill=cor)) + 
+  geom_tile() + theme_minimal(base_size = 30) +
+  scale_fill_gradient2(
+    low = "blue", high = "red", mid = "white", 
+    midpoint = 0, limit = c(-1,1)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+qtlcharts::iplotCorr(num_d2) 
+
+```
+
+```{r}
+# Impact of ZERO scoring Students on the assumptions on the model?
+
+model_all = lm(G3 ~ ., data = d2)
+summary(model_all)
+
+# Add fitted and residual values to the data set
+
+d2_resid_test = d2 %>%
+  mutate(model_fit = model_all$fitted.values,
+         model_resid = model_all$residuals)
+
+# Add innovative plots - Homoskedacitiy Test
+
+ggplot(d2_resid_test, aes(x = model_fit, y = model_resid)) +
+  geom_point() +
+  theme_test() +
+  labs(x = "Fitted", y = "Residual") +
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "loess", se = FALSE)
+
+
+# Add more interesting plot - qq plot
+
+ggplot(d2_resid_test, aes(sample = model_resid)) +
+  geom_qq() +
+  geom_qq_line() +
+  theme_test() +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+```
+
+```{r}
+
+# Model assumptions without the ZERO scoring students:
+
+d2_nozero = d2 %>%
+  filter(G3 > 0) 
+
+# Checking for Assumptions for no failure model:
+
+model_all = lm(G3 ~ ., data = d2_nozero)
+summary(model_all)
+
+# Add fitted and residual values to the data set
+
+d2_resid_test = d2_nozero %>%
+  mutate(model_fit = model_all$fitted.values,
+         model_resid = model_all$residuals)
+
+# Add innovative plots - Homoskedacity Test
+
+ggplot(d2_resid_test, aes(x = model_fit, y = model_resid)) +
+  geom_point() +
+  theme_test() +
+  labs(x = "Fitted", y = "Residual") +
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "loess", se = FALSE)
+
+
+# Add more interesting plot - qq plot
+
+ggplot(d2_resid_test, aes(sample = model_resid)) +
+  geom_qq() +
+  geom_qq_line() +
+  theme_test() +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+plot(model_all, 4)
+plot(model_all, 5)
+
+```
+
+```{r}
+# Utilized from Lectures - Very much subject to change
+
+M0_mod = lm(G3 ~ 1, data = d2_nozero)  # Null model
+M1_mod = lm(G3 ~ ., data = d2_nozero)  # Full model
+```
+
+```{r}
+res = bind_rows(broom::glance(M0_mod), 
+                broom::glance(M1_mod))
+res$model= c("M0","M1")
+res %>% pivot_longer(
+  cols = -model, 
+  names_to = "metric", 
+  values_to = "value") %>% 
+  pivot_wider(
+    names_from = "model") %>% 
+  gt::gt() %>% 
+  gt::fmt_number(columns = 2:3, 
+                 decimals = 2) %>% 
+  gt::fmt_missing()
+
+```
+
+```{r}
+
+# AIC Models:
+
+step.fwd.aic = step(M0_mod,
+                     scope = list(lower = M0_mod, upper = M1_mod),
+                     direction = "forward",
+                     trace = FALSE)
+
+step.back.aic = step(M1_mod,
+                     direction = "backward",
+                     trace = FALSE)
+
+#AIC(step.back.aic)
+#AIC(step.fwd.aic)
+
+```
+
+```{r}
+# Creating a table for the summary of the AIC Model
+
+sjPlot::tab_model(step.fwd.aic, step.back.aic, show.ci = FALSE, show.aic = TRUE,
+  dv.labels = c("Forward model AIC", "Backward model AIC"))
+
+summary(step.fwd.aic)$call
+summary(step.back.aic)$call
+
+```
+
+```{r}
+
+# BIC Models:
+
+step.fwd.bic = step(M0_mod,
+                     scope = list(lower = M0_mod, upper = M1_mod),
+                     direction = "forward",
+                     k = log(nrow(d2)),
+                     trace = FALSE)
+
+step.back.bic = step(M1_mod,
+                     direction = "backward",
+                     k = log(nrow(d2)),
+                     trace = FALSE)
+#BIC(step.back.bic)
+#BIC(step.fwd.bic)
+
+```
+
+```{r}
+
+# Creating a table for the summary of the BIC Model
+
+sjPlot::tab_model(step.fwd.bic, step.back.bic, show.ci = FALSE, show.aic = TRUE,
+  dv.labels = c("Forward model BIC", "Backward model BIC"))
+
+summary(step.fwd.bic)$call
+
+```
+
+```{r}
+
+# Checking Assumptions on the final model (FOR BIC FORWARD ONLY):
+
+# Add fitted and residual values to the data set
+
+FM_resid_test = d2_nozero %>%
+  mutate(FM_fit = step.fwd.bic$fitted.values,
+         FM_resid = step.fwd.bic$residuals)
+
+# Add innovative plots - Homoskedacitiy Test
+
+ggplot(FM_resid_test, aes(x = FM_fit, y = FM_resid)) +
+  geom_point() +
+  theme_test() +
+  labs(x = "Fitted", y = "Residual") +
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "loess", se = FALSE)
+
+
+# Add more interesting plot - qq plot
+
+ggplot(FM_resid_test, aes(sample = FM_resid)) +
+  geom_qq() +
+  geom_qq_line() +
+  theme_test() +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+plot(model_all, 4)
+plot(model_all, 5)
+
+```
+
+```{r}
+
+step.fwd.mod = ols_step_forward_aic(M1_mod)
+plot(step.fwd.mod) 
+#%>%
+  #ggplotly()
+
+step.fwd.mod$model
+
+```
+
+```{r}
+
+step.back.mod = ols_step_backward_aic(M1_mod)
+plot(step.back.mod) 
+#%>%
+  #ggplotly()
+
+step.back.mod$model
+
+```
